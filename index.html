@@ -1,0 +1,812 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>LEGO Adventure</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById("gameCanvas");
+        const ctx = canvas.getContext("2d");
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // World properties
+        const WORLD_WIDTH = 4000;
+        let cameraX = 0;
+
+        // Load images
+        const introLogo = new Image();
+        introLogo.src = "https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/LEGO_logo.svg/1200px-LEGO_logo.svg.png";
+        const background = new Image();
+        background.src = "https://static.vecteezy.com/system/resources/previews/042/702/976/non_2x/white-plastic-toy-blocks-modern-bricks-background-plastic-construction-plate-vector.jpg";
+        const playerImg = new Image();
+        playerImg.src = "https://i.imgur.com/lOo7OwX.png";
+        const playerWithSwordImg = new Image();
+        playerWithSwordImg.src = "https://i.imgur.com/yq3FN6R.png";
+        const knightImg = new Image();
+        knightImg.src = "https://i.imgur.com/S6ygZzA.png";
+        const swordIconImg = new Image();
+        swordIconImg.src = "https://i.imgur.com/30qzCP2.png";
+        const brickImg = new Image();
+        brickImg.src = "https://i.imgur.com/8aywNAT.png";
+        const buttonImg = new Image();
+        buttonImg.src = "https://i.imgur.com/cklBhvS.png";
+        const hammerIconImg = new Image();
+        hammerIconImg.src = "https://i.imgur.com/mRu6UfB.png";
+        const buildingImg = new Image();
+        buildingImg.src = "https://i.imgur.com/aKSWZiF.png";
+        const factoryImg = new Image();
+        factoryImg.src = "https://i.imgur.com/8THPXD4.png";
+        const hospitalImg = new Image();
+        hospitalImg.src = "https://i.imgur.com/ijHwAf2.png";
+        const enemyImg = new Image();
+        enemyImg.src = "https://i.imgur.com/YvhZbbT.png";
+
+        // Player properties
+        let player = {
+            x: 0,
+            y: 0,
+            speed: 5,
+            scale: 0.5,
+            hasSword: false,
+            health: 100,
+            attackCooldown: 0,
+            characterIndex: 0
+        };
+
+        // Character definitions
+        const characters = [
+            { name: "Default", img: playerImg, swordImg: playerWithSwordImg, damageTaken: 20, brickMultiplier: 1, speedBoost: 1, cost: 0, owned: true },
+            { name: "Knight", img: knightImg, swordImg: knightImg, damageTaken: 10, brickMultiplier: 5, speedBoost: 1.05, cost: 500, owned: false }
+        ];
+
+        // Sword icon properties (screen-space)
+        let swordIcon = {
+            width: 200,
+            height: 200,
+            x: 10,
+            y: canvas.height - 190,
+            borderSize: 10
+        };
+
+        // Hammer icon properties (screen-space)
+        let hammerIcon = {
+            width: 200,
+            height: 200,
+            x: canvas.width - 210,
+            y: canvas.height - 190,
+            borderSize: 10
+        };
+
+        // Hotbar properties (screen-space)
+        let hotbar = {
+            slotSize: 60,
+            slotCount: 9,
+            x: 0,
+            y: canvas.height - 80,
+            brickCount: 1
+        };
+        hotbar.width = hotbar.slotSize * hotbar.slotCount;
+
+        // Button properties (screen-space)
+        let button = {
+            width: 100,
+            height: 100,
+            x: 10,
+            y: 10,
+            hover: false,
+            scale: 1
+        };
+
+        // Brick properties
+        let brick = {
+            x: Math.random() * (WORLD_WIDTH - 50),
+            y: Math.random() * (canvas.height - 50 - hotbar.slotSize),
+            scale: 0.3,
+            collected: false,
+            spawnDelay: 0
+        };
+
+        // Enemy properties
+        let enemy = {
+            x: WORLD_WIDTH - 100,
+            y: canvas.height / 2,
+            scale: 1.0,
+            speed: 2,
+            health: 40,
+            backoff: 0,
+            respawnTimer: 0,
+            targeted: false
+        };
+
+        // Menu and placement state
+        let showMenu = false;
+        let placingBuilding = false;
+        let buildingX = 0;
+        let buildingY = 0;
+        let placedBuildings = [];
+        let selectedBuilding = null;
+        let menuScrollY = 0;
+
+        // Cancel button properties (screen-space)
+        let cancelButton = {
+            width: 100,
+            height: 50,
+            x: (canvas.width - 100) / 2,
+            y: canvas.height - 70
+        };
+
+        // Game state
+        let gameState = "intro";
+        let introTimer = 0;
+
+        // Track keys and mouse
+        let keys = { w: false, a: false, s: false, d: false };
+        let mouseX = 0;
+        let mouseY = 0;
+
+        // Reset game state
+        function resetGame() {
+            player.x = 0;
+            player.y = (canvas.height - characters[player.characterIndex].img.height * player.scale) / 2;
+            player.health = 100;
+            player.hasSword = characters[player.characterIndex].name === "Knight";
+            player.attackCooldown = 0;
+            cameraX = 0;
+            hotbar.x = (canvas.width - hotbar.width) / 2;
+            hotbar.brickCount = 1;
+            brick.x = Math.random() * (WORLD_WIDTH - brickImg.width * brick.scale);
+            brick.y = Math.random() * (canvas.height - brickImg.height * brick.scale - hotbar.slotSize);
+            brick.collected = false;
+            brick.spawnDelay = 0;
+            enemy.x = WORLD_WIDTH - 100;
+            enemy.y = canvas.height / 2;
+            enemy.health = 40;
+            enemy.backoff = 0;
+            enemy.respawnTimer = 0;
+            enemy.targeted = false;
+            placedBuildings = [];
+            hammerIcon.x = canvas.width - 210;
+            gameState = "intro";
+            introTimer = 0;
+            menuScrollY = 0;
+        }
+
+        // Draw modern hotbar with health bar (screen-space)
+        function drawHotbar() {
+            ctx.fillStyle = "rgba(50, 50, 50, 0.8)";
+            ctx.fillRect(hotbar.x - 10, hotbar.y - 20, hotbar.width + 20, hotbar.slotSize + 30);
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 2;
+            ctx.strokeRect(hotbar.x - 10, hotbar.y - 20, hotbar.width + 20, hotbar.slotSize + 30);
+
+            for (let i = 0; i < hotbar.slotCount; i++) {
+                const slotX = hotbar.x + i * hotbar.slotSize;
+                ctx.fillStyle = "rgba(100, 100, 100, 0.9)";
+                ctx.fillRect(slotX, hotbar.y, hotbar.slotSize - 2, hotbar.slotSize - 2);
+                ctx.strokeStyle = "#AAAAAA";
+                ctx.strokeRect(slotX, hotbar.y, hotbar.slotSize - 2, hotbar.slotSize - 2);
+
+                if (i === 0) {
+                    ctx.drawImage(brickImg, slotX + 10, hotbar.y + 10, hotbar.slotSize - 22, hotbar.slotSize - 22);
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.font = "bold 16px Arial";
+                    ctx.textAlign = "right";
+                    ctx.fillText(`${hotbar.brickCount}`, slotX + hotbar.slotSize - 8, hotbar.y + hotbar.slotSize - 8);
+                }
+            }
+
+            const healthBarWidth = hotbar.width - 20;
+            ctx.fillStyle = "#222222";
+            ctx.fillRect(hotbar.x, hotbar.y - 20, healthBarWidth, 10);
+            ctx.fillStyle = "#FF5555";
+            const healthWidth = (player.health / 100) * healthBarWidth;
+            ctx.fillRect(hotbar.x, hotbar.y - 20, healthWidth, 10);
+            ctx.strokeStyle = "#FFFFFF";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(hotbar.x, hotbar.y - 20, healthBarWidth, 10);
+        }
+
+        // Check collision
+        function checkCollision(obj1, obj2) {
+            const rect1 = {
+                x: obj1.x,
+                y: obj1.y,
+                width: obj1.scale * (obj1 === player ? characters[player.characterIndex].img.width : obj2 === brick ? brickImg.width : enemyImg.width),
+                height: obj1.scale * (obj1 === player ? characters[player.characterIndex].img.height : obj2 === brick ? brickImg.height : enemyImg.height)
+            };
+            const rect2 = {
+                x: obj2.x,
+                y: obj2.y,
+                width: obj2.scale * (obj2 === player ? characters[player.characterIndex].img.width : obj1 === brick ? brickImg.width : enemyImg.width),
+                height: obj2.scale * (obj2 === player ? characters[player.characterIndex].img.height : obj1 === brick ? brickImg.height : enemyImg.height)
+            };
+            return rect1.x < rect2.x + rect2.width &&
+                   rect1.x + rect1.width > rect2.x &&
+                   rect1.y < rect2.y + rect2.height &&
+                   rect1.y + rect1.height > rect2.y;
+        }
+
+        // Check if enemy is in sword range (300px)
+        function isEnemyInRange() {
+            const dx = (enemy.x + enemyImg.width * enemy.scale / 2) - (player.x + characters[player.characterIndex].img.width * player.scale / 2);
+            const dy = (enemy.y + enemyImg.height * enemy.scale / 2) - (player.y + characters[player.characterIndex].img.height * player.scale / 2);
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            return distance <= 300;
+        }
+
+        // Generate new brick
+        function spawnBrick() {
+            brick.x = Math.random() * (WORLD_WIDTH - brickImg.width * brick.scale);
+            brick.y = Math.random() * (canvas.height - brickImg.height * brick.scale - hotbar.slotSize);
+            brick.collected = false;
+        }
+
+        // Respawn enemy
+        function respawnEnemy() {
+            enemy.x = Math.random() * (WORLD_WIDTH - enemyImg.width * enemy.scale);
+            enemy.y = Math.random() * (canvas.height - enemyImg.height * enemy.scale - hotbar.slotSize);
+            enemy.health = 40;
+            enemy.backoff = 0;
+            enemy.respawnTimer = 0;
+            enemy.targeted = false;
+        }
+
+        // Draw main menu with character selection
+        function drawMainMenu() {
+            ctx.fillStyle = "#333333";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Title
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "bold 50px Arial";
+            ctx.textAlign = "center";
+            ctx.fillText("LEGO Adventure", canvas.width / 2, 100);
+
+            // Character selection (moved higher)
+            const charWidth = 200;
+            const charHeight = 300;
+            const charX = (canvas.width - charWidth) / 2;
+            const charY = 150; // Moved up from 200
+
+            // Draw current character
+            const currentChar = characters[player.characterIndex];
+            ctx.drawImage(currentChar.img, charX, charY, charWidth, charHeight);
+
+            // Neon yellow arrows
+            ctx.fillStyle = "#FFFF00";
+            ctx.font = "bold 60px Arial";
+            const arrowLeftX = charX - 50;
+            const arrowRightX = charX + charWidth + 10;
+            const arrowY = charY + charHeight / 2 + 20;
+            ctx.fillText("<", arrowLeftX, arrowY);
+            ctx.fillText(">", arrowRightX, arrowY);
+
+            // Character name and buffs
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "bold 30px Arial";
+            ctx.fillText(currentChar.name, canvas.width / 2, charY + charHeight + 40);
+            ctx.font = "20px Arial";
+            if (currentChar.owned) {
+                ctx.fillText(`Damage Taken: ${currentChar.damageTaken}`, canvas.width / 2, charY + charHeight + 70);
+                ctx.fillText(`Brick Multiplier: ${currentChar.brickMultiplier}x`, canvas.width / 2, charY + charHeight + 100);
+                ctx.fillText(`Speed: ${Math.round(currentChar.speedBoost * 100)}%`, canvas.width / 2, charY + charHeight + 130);
+            } else {
+                ctx.fillText(`Cost: ${currentChar.cost} bricks`, canvas.width / 2, charY + charHeight + 70);
+                ctx.fillText("Damage Taken: 10", canvas.width / 2, charY + charHeight + 100);
+                ctx.fillText("Brick Multiplier: 5x", canvas.width / 2, charY + charHeight + 130);
+                ctx.fillText("Speed: 105%", canvas.width / 2, charY + charHeight + 160);
+            }
+
+            // Start button
+            ctx.fillStyle = "#00FF00";
+            ctx.fillRect(canvas.width / 2 - 100, canvas.height - 150, 200, 50);
+            ctx.fillStyle = "#FFFFFF";
+            ctx.font = "bold 25px Arial";
+            ctx.fillText("Start Game", canvas.width / 2, canvas.height - 115);
+        }
+
+        // Draw scrollable buildings menu (screen-space)
+        function drawBuildingsMenu() {
+            if (showMenu) {
+                const menuWidth = 300;
+                const menuHeight = canvas.height;
+                ctx.fillStyle = "rgba(50, 50, 50, 0.9)";
+                ctx.fillRect(canvas.width - menuWidth, 0, menuWidth, menuHeight);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.font = "bold 30px Arial";
+                ctx.textAlign = "left";
+                ctx.fillText("Buildings", canvas.width - menuWidth + 20, 50);
+
+                // Clip to menu area for scrolling
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(canvas.width - menuWidth, 0, menuWidth, menuHeight);
+                ctx.clip();
+
+                const buildingHeight = 150;
+                const building1Y = 100 - menuScrollY;
+                const building2Y = 250 - menuScrollY;
+                const building3Y = 400 - menuScrollY;
+
+                ctx.drawImage(buildingImg, canvas.width - menuWidth + 20, building1Y, 100, 100);
+                ctx.font = "16px Arial";
+                ctx.fillText("Required: 10", canvas.width - menuWidth + 20, building1Y + 120);
+                ctx.drawImage(brickImg, canvas.width - menuWidth + 110, building1Y + 105, 20, 20);
+
+                ctx.drawImage(factoryImg, canvas.width - menuWidth + 20, building2Y, 100, 100);
+                ctx.fillText("Required: 25", canvas.width - menuWidth + 20, building2Y + 120);
+                ctx.drawImage(brickImg, canvas.width - menuWidth + 110, building2Y + 105, 20, 20);
+
+                ctx.drawImage(hospitalImg, canvas.width - menuWidth + 20, building3Y, 100, 100);
+                ctx.fillText("Required: 80", canvas.width - menuWidth + 20, building3Y + 120);
+                ctx.drawImage(brickImg, canvas.width - menuWidth + 110, building3Y + 105, 20, 20);
+
+                ctx.restore();
+            }
+        }
+
+        // Draw cancel button (screen-space)
+        function drawCancelButton() {
+            if (placingBuilding) {
+                ctx.fillStyle = "#FF4444";
+                ctx.fillRect(cancelButton.x, cancelButton.y, cancelButton.width, cancelButton.height);
+                ctx.fillStyle = "#FFFFFF";
+                ctx.font = "bold 20px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("Cancel", cancelButton.x + cancelButton.width / 2, cancelButton.y + cancelButton.height / 2 + 5);
+            }
+        }
+
+        // Draw aim-lock icon
+        function drawAimLock() {
+            if (enemy.targeted && enemy.health > 0) {
+                const centerX = enemy.x - cameraX + enemyImg.width * enemy.scale / 2;
+                const centerY = enemy.y + enemyImg.height * enemy.scale / 2;
+                ctx.strokeStyle = "#FF0000";
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 20, 0, Math.PI * 2);
+                ctx.moveTo(centerX - 5, centerY);
+                ctx.lineTo(centerX + 5, centerY);
+                ctx.moveTo(centerX, centerY - 5);
+                ctx.lineTo(centerX, centerY + 5);
+                ctx.stroke();
+            }
+        }
+
+        // Draw intro screen with animation and disclaimer
+        function drawIntro(deltaTime) {
+            ctx.fillStyle = "#000000";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === "intro") {
+                introTimer += deltaTime;
+                let alpha = 0;
+                let scale = 0;
+
+                // Fade in (0s - 1s)
+                if (introTimer < 1) {
+                    alpha = introTimer / 1;
+                    scale = 0.5 + (introTimer / 1) * 0.5;
+                }
+                // Hold (1s - 4s)
+                else if (introTimer < 4) {
+                    alpha = 1;
+                    scale = 1;
+                }
+                // Fade out (4s - 5s)
+                else if (introTimer < 5) {
+                    alpha = 1 - (introTimer - 4) / 1;
+                    scale = 1;
+                }
+                // Done
+                else {
+                    gameState = "menu";
+                    introTimer = 0;
+                    return;
+                }
+
+                const logoHeight = 200;
+                const logoWidth = logoHeight * (introLogo.width / introLogo.height);
+                const logoX = (canvas.width - logoWidth * scale) / 2;
+                const logoY = (canvas.height - logoHeight * scale) / 2 - 50;
+
+                ctx.globalAlpha = alpha;
+                ctx.drawImage(introLogo, logoX, logoY, logoWidth * scale, logoHeight * scale);
+
+                ctx.fillStyle = "#FFFFFF";
+                ctx.font = "bold 20px Arial";
+                ctx.textAlign = "center";
+                ctx.fillText("An unofficial fan-made game", canvas.width / 2, logoY + logoHeight * scale + 30);
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        // Game loop
+        let lastTime = performance.now();
+        function gameLoop(currentTime) {
+            const deltaTime = (currentTime - lastTime) / 1000;
+            lastTime = currentTime;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (gameState === "intro") {
+                drawIntro(deltaTime);
+            } else if (gameState === "menu") {
+                drawMainMenu();
+            } else if (gameState === "game") {
+                // Update player position
+                const currentSpeed = player.speed * characters[player.characterIndex].speedBoost;
+                if (!placingBuilding) {
+                    if (keys.w && player.y > 0) player.y -= currentSpeed;
+                    if (keys.s && player.y < canvas.height - characters[player.characterIndex].img.height * player.scale) player.y += currentSpeed;
+                    if (keys.a && player.x > 0) player.x -= currentSpeed;
+                    if (keys.d && player.x < WORLD_WIDTH - characters[player.characterIndex].img.width * player.scale) player.x += currentSpeed;
+
+                    // Update camera
+                    const playerScreenX = player.x - cameraX;
+                    if (playerScreenX > canvas.width * 0.7) {
+                        cameraX = Math.min(player.x - canvas.width * 0.7, WORLD_WIDTH - canvas.width);
+                    } else if (playerScreenX < canvas.width * 0.3) {
+                        cameraX = Math.max(player.x - canvas.width * 0.3, 0);
+                    }
+
+                    // Enemy chase
+                    if (enemy.health > 0 && enemy.backoff <= 0) {
+                        const dx = player.x - enemy.x;
+                        const dy = player.y - enemy.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance > 5) {
+                            enemy.x += (dx / distance) * enemy.speed;
+                            enemy.y += (dy / distance) * enemy.speed;
+                        }
+                    }
+
+                    // Enemy backoff
+                    if (enemy.backoff > 0) {
+                        enemy.backoff -= deltaTime;
+                        const dx = player.x - enemy.x;
+                        const dy = player.y - enemy.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        if (distance > 0) {
+                            enemy.x -= (dx / distance) * enemy.speed * 2;
+                            enemy.y -= (dy / distance) * enemy.speed * 2;
+                        }
+                    }
+
+                    // Enemy collision
+                    if (checkCollision(player, enemy) && enemy.backoff <= 0 && enemy.health > 0) {
+                        player.health = Math.max(0, player.health - characters[player.characterIndex].damageTaken);
+                        enemy.backoff = 0.5;
+                        if (player.health <= 0) resetGame();
+                    }
+
+                    // Player auto-attack enemy
+                    if (player.hasSword && enemy.health > 0 && isEnemyInRange()) {
+                        if (player.attackCooldown <= 0) {
+                            enemy.health -= 20;
+                            player.attackCooldown = 0.3;
+                            if (enemy.health <= 0) enemy.respawnTimer = 0;
+                        }
+                    }
+                    if (player.attackCooldown > 0) {
+                        player.attackCooldown -= deltaTime;
+                    }
+
+                    // Enemy respawn
+                    if (enemy.health <= 0 && enemy.respawnTimer >= 0) {
+                        enemy.respawnTimer += deltaTime;
+                        if (enemy.respawnTimer >= 10) {
+                            respawnEnemy();
+                        }
+                    }
+
+                    // Factory brick generation (1 brick / 2s)
+                    // Hospital healing (1 health / 0.5s)
+                    placedBuildings.forEach(building => {
+                        if (building.type === "factory") {
+                            building.timer = (building.timer || 0) + deltaTime;
+                            if (building.timer >= 2) {
+                                hotbar.brickCount += 1;
+                                building.timer = 0;
+                            }
+                        } else if (building.type === "hospital") {
+                            building.timer = (building.timer || 0) + deltaTime;
+                            if (building.timer >= 0.5) {
+                                player.health = Math.min(100, player.health + 1);
+                                building.timer = 0;
+                            }
+                        }
+                    });
+
+                    // Check brick collection
+                    if (!brick.collected && checkCollision(player, brick)) {
+                        hotbar.brickCount += characters[player.characterIndex].brickMultiplier;
+                        brick.collected = true;
+                        brick.spawnDelay = 0.5;
+                    }
+
+                    // Handle spawn delay
+                    if (brick.collected && brick.spawnDelay > 0) {
+                        brick.spawnDelay -= deltaTime;
+                        if (brick.spawnDelay <= 0) {
+                            spawnBrick();
+                        }
+                    }
+
+                    // Button hover
+                    button.hover = (mouseX >= button.x && mouseX <= button.x + button.width &&
+                                    mouseY >= button.y && mouseY <= button.y + button.height);
+                    button.scale = button.hover ? 1.1 : 1;
+                }
+
+                // Update building placement position
+                if (placingBuilding) {
+                    buildingX = mouseX + cameraX - (selectedBuilding === "building" ? buildingImg.width : selectedBuilding === "factory" ? factoryImg.width : hospitalImg.width) * 0.5 / 2;
+                    buildingY = mouseY - (selectedBuilding === "building" ? buildingImg.height : selectedBuilding === "factory" ? factoryImg.height : hospitalImg.height) * 0.5 / 2;
+                }
+
+                // Draw everything
+                ctx.imageSmoothingEnabled = false;
+
+                // Draw background (tiled)
+                const bgWidth = background.width;
+                for (let x = -cameraX % bgWidth; x < canvas.width; x += bgWidth) {
+                    ctx.drawImage(background, x, 0, bgWidth, canvas.height);
+                }
+
+                if (!placingBuilding) {
+                    const currentPlayerImg = player.hasSword ? characters[player.characterIndex].swordImg : characters[player.characterIndex].img;
+                    ctx.drawImage(currentPlayerImg, player.x - cameraX, player.y, currentPlayerImg.width * player.scale, currentPlayerImg.height * player.scale);
+                    if (player.characterIndex === 0) { // Only show sword icon for Default
+                        ctx.drawImage(swordIconImg, swordIcon.x, swordIcon.y, swordIcon.width, swordIcon.height);
+                    }
+                    ctx.drawImage(hammerIconImg, hammerIcon.x, hammerIcon.y, hammerIcon.width, hammerIcon.height);
+                    drawHotbar();
+                    if (!brick.collected) {
+                        ctx.drawImage(brickImg, brick.x - cameraX, brick.y, brickImg.width * brick.scale, brickImg.height * brick.scale);
+                    }
+                    const buttonWidth = button.width * button.scale;
+                    const buttonHeight = button.height * button.scale;
+                    const buttonX = button.x - (buttonWidth - button.width) / 2;
+                    const buttonY = button.y - (buttonHeight - button.height) / 2;
+                    ctx.drawImage(buttonImg, buttonX, buttonY, buttonWidth, buttonHeight);
+                    drawBuildingsMenu();
+
+                    // Draw enemy and aim-lock
+                    if (enemy.health > 0) {
+                        ctx.drawImage(enemyImg, enemy.x - cameraX, enemy.y, enemyImg.width * enemy.scale, enemyImg.height * enemy.scale);
+                        drawAimLock();
+                    }
+                }
+
+                // Draw placed buildings
+                placedBuildings.forEach(building => {
+                    const img = building.type === "building" ? buildingImg : building.type === "factory" ? factoryImg : hospitalImg;
+                    ctx.drawImage(img, building.x - cameraX, building.y, img.width * 0.5, img.height * 0.5);
+                });
+
+                // Draw building being placed and cancel button
+                if (placingBuilding) {
+                    const img = selectedBuilding === "building" ? buildingImg : selectedBuilding === "factory" ? factoryImg : hospitalImg;
+                    ctx.drawImage(img, buildingX - cameraX, buildingY, img.width * 0.5, img.height * 0.5);
+                    drawCancelButton();
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Handle key presses
+        document.addEventListener("keydown", (event) => {
+            if (!placingBuilding && gameState === "game") {
+                switch (event.key.toLowerCase()) {
+                    case "w": keys.w = true; break;
+                    case "a": keys.a = true; break;
+                    case "s": keys.s = true; break;
+                    case "d": keys.d = true; break;
+                }
+            }
+        });
+        document.addEventListener("keyup", (event) => {
+            switch (event.key.toLowerCase()) {
+                case "w": keys.w = false; break;
+                case "a": keys.a = false; break;
+                case "s": keys.s = false; break;
+                case "d": keys.d = false; break;
+            }
+        });
+
+        // Handle clicks
+        canvas.addEventListener("click", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            const clickX = event.clientX - rect.left;
+            const clickY = event.clientY - rect.top;
+
+            if (gameState === "menu") {
+                const charX = (canvas.width - 200) / 2;
+                const charY = 150;
+                const arrowY = charY + 170; // Center of arrows
+
+                // Left arrow (clickable area: 40px wide, 60px tall)
+                if (clickX >= charX - 50 && clickX <= charX - 10 &&
+                    clickY >= arrowY - 30 && clickY <= arrowY + 30) {
+                    let newIndex = (player.characterIndex - 1 + characters.length) % characters.length;
+                    while (!characters[newIndex].owned) {
+                        newIndex = (newIndex - 1 + characters.length) % characters.length;
+                        if (newIndex === player.characterIndex) break;
+                    }
+                    player.characterIndex = newIndex;
+                }
+                // Right arrow (clickable area: 40px wide, 60px tall)
+                if (clickX >= charX + 210 && clickX <= charX + 250 &&
+                    clickY >= arrowY - 30 && clickY <= arrowY + 30) {
+                    let newIndex = (player.characterIndex + 1) % characters.length;
+                    while (!characters[newIndex].owned) {
+                        newIndex = (newIndex + 1) % characters.length;
+                        if (newIndex === player.characterIndex) break;
+                    }
+                    player.characterIndex = newIndex;
+                }
+                // Buy character
+                if (!characters[player.characterIndex].owned && clickX >= charX && clickX <= charX + 200 &&
+                    clickY >= charY + 300 && clickY <= charY + 350 && hotbar.brickCount >= characters[player.characterIndex].cost) {
+                    hotbar.brickCount -= characters[player.characterIndex].cost;
+                    characters[player.characterIndex].owned = true;
+                }
+                // Start button
+                if (clickX >= canvas.width / 2 - 100 && clickX <= canvas.width / 2 + 100 &&
+                    clickY >= canvas.height - 150 && clickY <= canvas.height - 100) {
+                    gameState = "game";
+                }
+            } else if (gameState === "game") {
+                if (!placingBuilding) {
+                    // Home button (takes you to menu)
+                    if (clickX >= button.x && clickX <= button.x + button.width &&
+                        clickY >= button.y && clickY <= button.y + button.height) {
+                        gameState = "menu";
+                        return;
+                    }
+
+                    // Sword icon click (only for Default)
+                    if (player.characterIndex === 0 && clickX >= swordIcon.x - swordIcon.borderSize &&
+                        clickX <= swordIcon.x + swordIcon.width + swordIcon.borderSize &&
+                        clickY >= swordIcon.y - swordIcon.borderSize &&
+                        clickY <= swordIcon.y + swordIcon.height + swordIcon.borderSize) {
+                        player.hasSword = !player.hasSword;
+                    }
+
+                    // Hammer icon click
+                    if (clickX >= hammerIcon.x - hammerIcon.borderSize &&
+                        clickX <= hammerIcon.x + hammerIcon.width + hammerIcon.borderSize &&
+                        clickY >= hammerIcon.y - hammerIcon.borderSize &&
+                        clickY <= hammerIcon.y + hammerIcon.height + hammerIcon.borderSize) {
+                        showMenu = !showMenu;
+                    }
+
+                    // Building clicks in menu
+                    if (showMenu) {
+                        const menuWidth = 300;
+                        const building1Y = 100 - menuScrollY;
+                        const building2Y = 250 - menuScrollY;
+                        const building3Y = 400 - menuScrollY;
+                        const buildingX = canvas.width - menuWidth + 20;
+
+                        if (clickX >= buildingX && clickX <= buildingX + 100 &&
+                            clickY >= building1Y && clickY <= building1Y + 100 &&
+                            hotbar.brickCount >= 10) {
+                            placingBuilding = true;
+                            selectedBuilding = "building";
+                            showMenu = false;
+                            buildingX = mouseX + cameraX - buildingImg.width * 0.5 / 2;
+                            buildingY = mouseY - buildingImg.height * 0.5 / 2;
+                        }
+                        if (clickX >= buildingX && clickX <= buildingX + 100 &&
+                            clickY >= building2Y && clickY <= building2Y + 100 &&
+                            hotbar.brickCount >= 25) {
+                            placingBuilding = true;
+                            selectedBuilding = "factory";
+                            showMenu = false;
+                            buildingX = mouseX + cameraX - factoryImg.width * 0.5 / 2;
+                            buildingY = mouseY - factoryImg.height * 0.5 / 2;
+                        }
+                        if (clickX >= buildingX && clickX <= buildingX + 100 &&
+                            clickY >= building3Y && clickY <= building3Y + 100 &&
+                            hotbar.brickCount >= 80) {
+                            placingBuilding = true;
+                            selectedBuilding = "hospital";
+                            showMenu = false;
+                            buildingX = mouseX + cameraX - hospitalImg.width * 0.5 / 2;
+                            buildingY = mouseY - hospitalImg.height * 0.5 / 2;
+                        }
+                    }
+
+                    // Aim-lock on enemy click
+                    if (enemy.health > 0) {
+                        const enemyRect = {
+                            x: enemy.x - cameraX,
+                            y: enemy.y,
+                            width: enemyImg.width * enemy.scale,
+                            height: enemyImg.height * enemy.scale
+                        };
+                        if (clickX >= enemyRect.x && clickX <= enemyRect.x + enemyRect.width &&
+                            clickY >= enemyRect.y && clickY <= enemyRect.y + enemyRect.height) {
+                            if (!isEnemyInRange()) {
+                                enemy.targeted = true;
+                            }
+                        }
+                    }
+                } else {
+                    // Cancel button click
+                    if (clickX >= cancelButton.x && clickX <= cancelButton.x + cancelButton.width &&
+                        clickY >= cancelButton.y && clickY <= cancelButton.y + cancelButton.height) {
+                        placingBuilding = false;
+                        selectedBuilding = null;
+                    }
+                    // Place building
+                    else {
+                        placedBuildings.push({ 
+                            x: buildingX, 
+                            y: buildingY, 
+                            type: selectedBuilding,
+                            timer: 0
+                        });
+                        hotbar.brickCount -= selectedBuilding === "building" ? 10 : selectedBuilding === "factory" ? 25 : 80;
+                        placingBuilding = false;
+                        selectedBuilding = null;
+                    }
+                }
+            }
+        });
+
+        // Track mouse position
+        canvas.addEventListener("mousemove", (event) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = event.clientX - rect.left;
+            mouseY = event.clientY - rect.top;
+        });
+
+        // Handle mouse wheel for scrolling
+        canvas.addEventListener("wheel", (event) => {
+            if (showMenu && gameState === "game") {
+                menuScrollY += event.deltaY * 0.5;
+                menuScrollY = Math.max(0, Math.min(menuScrollY, 300));
+            }
+        });
+
+        // Resize canvas
+        window.addEventListener("resize", () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = (canvas.height - characters[player.characterIndex].img.height * player.scale) / 2;
+            swordIcon.y = canvas.height - 190;
+            hammerIcon.x = canvas.width - 210;
+            hammerIcon.y = canvas.height - 190;
+            hotbar.x = (canvas.width - hotbar.width) / 2;
+            hotbar.y = canvas.height - 80;
+            button.x = 10;
+            cancelButton.x = (canvas.width - cancelButton.width) / 2;
+            cancelButton.y = canvas.height - 70;
+        });
+
+        // Start game loop immediately
+        resetGame();
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
